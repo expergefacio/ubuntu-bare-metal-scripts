@@ -6,6 +6,9 @@
 # /etc/systemd/system/kasmvncserver.service
 
 # NB
+#
+# needs full sudo reboot if kasmvnc crashes, atm
+#
 # There was a ton of back and too before figureing this out
 # so there may be settings related to disabling default
 # xfce of lightdm settings thats been lost in the process
