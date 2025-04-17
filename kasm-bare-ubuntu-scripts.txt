@@ -23,21 +23,53 @@ Description=KasmVNC Server
 After=network.target graphical.target
 
 [Service]
-Type=simple
-# Cleanup any old lock files before starting the server
+Type=forking
+User=USERNAME
+Group=USERNAME
+WorkingDirectory=/home/USERNAME
+Environment="DISPLAY=:1"
+PIDFile=/home/USERNAME/.vnc/###HOSTNAME###:1.pid
+
+# Cleanup before starting
 ExecStartPre=/usr/local/bin/clean-vnc-lock.sh
 ExecStartPre=/bin/rm -f /tmp/.X*-lock
-ExecStartPre=/usr/bin/xauth generate :1 .
-ExecStart=/bin/sleep 10 && /usr/bin/kasmvncserver --rfbport=8444
+# ExecStartPre=/usr/bin/xauth generate :1 .
+
+# Add the required delay BEFORE starting the main command
+ExecStartPre=/bin/sleep 10
+
+# Main command (without sleep)
+ExecStart=/usr/bin/kasmvncserver --rfbport=8444
+
+# ExecStart=/bin/sleep 10 && /usr/bin/kasmvncserver --rfbport=8444
+
+# Cleanup on stop/crash
+# Send SIGTERM first, wait, then send SIGKILL to ensure cleanup
+
+ExecStop=/bin/kill -SIGTERM -$$(cat ${PIDFile})
+ExecStop=/bin/sleep 2
+
+# Add commands to kill potential orphans explicitly
+# Use pkill to find processes by command name AND user to be safer
+
+ExecStop=/usr/bin/pkill -u USERNAME -f "Xvfb :1"
+ExecStop=/usr/bin/pkill -u USERNAME -f "kasmvncserver --rfbport=8444"
+ExecStop=/bin/sleep 1
+
+# Final cleanup of locks just in case
+ExecStop=/bin/rm -f /tmp/.X1-lock /tmp/.X*-lock ${PIDFile}
+
+# Restart behaviour
 Restart=always
 RestartSec=10s
-User=########
-Group=########
-WorkingDirectory=/home/#######
-Environment="DISPLAY=:1"
-PIDFile=/home/#######/.vnc/[#HOSTNAME#]:1.pid
-StandardOutput=file:/home/#######/kasmvnc.log
-StandardError=file:/home/#######/kasmvnc.log
+
+# Kill the main process and all others in its cgroup upon stop.
+KillMode=mixed
+TimeoutStopSec=30s
+ # Give ExecStop time to run
+
+StandardOutput=file:/home/USERNAME/kasmvnc.log
+StandardError=file:/home/USERNAME/kasmvnc.log
 
 [Install]
 WantedBy=multi-user.target
@@ -47,9 +79,9 @@ WantedBy=multi-user.target
 #######################################
 #!/bin/bash
 # Log output to a file for debugging
-echo "Running clean-vnc-lock.sh at $(date)" >> /tmp/vnc_cleanup.log
+#echo "Running clean-vnc-lock.sh at $(date)" >> /tmp/vnc_cleanup.log
 rm -f /tmp/.X1-lock
-echo "Removed /tmp/.X1-lock at $(date)" >> /tmp/vnc_cleanup.log
+#echo "Removed /tmp/.X1-lock at $(date)" >> /tmp/vnc_cleanup.log
 
 ###############################################
 ❯ cat /etc/systemd/system/kasmvncserver.service.d/override.conf
