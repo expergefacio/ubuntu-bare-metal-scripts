@@ -1,0 +1,126 @@
+Work in progress....
+
+sudo apt update
+sudo apt install pulseaudio pulseaudio-utils pavucontrol ffmpeg --no-install-recommends
+
+#######################
+# ❯ sudo micro /etc/pulse/default.pa
+# then add:
+#######################
+
+### Create a virtual sink for Kasm streaming
+load-module module-null-sink sink_name=kasm_stream_output sink_properties=device.description="Kasm_Stream_Output"
+# Automatically create a monitor source for the sink
+# load-module module-null-sink sink_name=MySink sink_properties=device.description="My Null Sink" source_name=MySinkMonitor source_properties=device.description="Monitor of My Null Sink"
+# (Often the monitor source is created automatically, check with 'pactl list sources')
+
+### Set this virtual sink as the default output
+set-default-sink kasm_stream_output
+
+### Optional: Load module for streaming/capturing if needed later (we'll use ffmpeg separately)
+# load-module module-simple-protocol-tcp source=kasm_stream_output.monitor record=true port=12345 format=s16le rate=44100 channels=2
+
+#######################
+# inside kasmvnc run:
+#######################
+
+pulseaudio -k
+pulseaudio --start
+
+pactl list sinks short # Look for 'kasm_stream_output'
+pactl info | grep "Default Sink" # Should show 'kasm_stream_output'
+
+
+pactl list sources short | grep kasm_stream_output
+#output: 1	kasm_stream_output.monitor	module-null-sink.c	s16le 2ch 44100Hz	SUSPENDED
+
+
+#########################
+❯ micro start_audio_stream.sh
+# remember chmod +x ~/start_audio_stream.sh
+#########################
+#!/bin/bash
+
+PULSE_SOURCE="kasm_stream_output.monitor"
+ICECAST_HOST="localhost" # Or the IP if Icecast is elsewhere
+ICECAST_PORT="8000"
+ICECAST_PASSWORD="YOUR_SOURCE_PASSWORD" # The source password you set!
+ICECAST_MOUNTPOINT="kasmaudio.ogg" # Name for your stream URL path
+
+AUDIO_CODEC="libopus"
+BITRATE="96k"
+FORMAT="ogg"
+CONTENT_TYPE="audio/ogg"
+
+echo "Starting audio stream from $PULSE_SOURCE to Icecast mount /$ICECAST_MOUNTPOINT..."
+
+ffmpeg -loglevel warning -re \
+  -f pulse -i "$PULSE_SOURCE" \
+  -acodec "$AUDIO_CODEC" -b:a "$BITRATE" -ac 2 \
+  -content_type "$CONTENT_TYPE" -f "$FORMAT" \
+  icecast://source:$ICECAST_PASSWORD@$ICECAST_HOST:$ICECAST_PORT/$ICECAST_MOUNTPOINT
+
+# Note: The output is now an icecast:// URL
+# 'source' is the default username for sources in Icecast
+
+echo "ffmpeg stream ended."
+
+##########################
+sudo apt install icecast2
+##########################
+#in icecast config change port 8000 to port 8093 ir whatever you are using
+sudo micro /etc/icecast2/icecast.xml
+#then:
+sudo systemctl restart icecast2
+
+
+
+####################
+audio tag:
+####################
+<audio id="kasmAudioStream" controls autoplay style="position: absolute; top: 10px; right: 10px; z-index: 1000;">
+  <source src="http://###HOSTNAME###.local:8093/kasmaudio.ogg" type="audio/ogg">
+  Your browser does not support the audio element for streaming.
+</audio>
+
+
+
+
+####################
+sudo micro /etc/systemd/system/kasm-audio-stream.service
+####################
+[Unit]
+Description=KasmVNC Audio Streamer (ffmpeg to Icecast)
+# Start after network is ready and icecast should be running
+After=network-online.target icecast2.service
+Wants=icecast2.service
+
+[Service]
+# --- IMPORTANT: Set the correct user and group ---
+User=YOUR_KASM_USER
+Group=YOUR_KASM_USER # Often same as user, adjust if needed
+
+# Set working directory to the script's location
+WorkingDirectory=/home/YOUR_KASM_USER/
+# Full path to the script
+ExecStart=/home/YOUR_KASM_USER/start_audio_stream.sh
+
+# Set environment variables needed to find the user's PulseAudio instance
+Environment="XDG_RUNTIME_DIR=/run/user/%U"
+Environment="PULSE_SERVER=unix:/run/user/%U/pulse/native"
+
+# Restart the service if it fails
+Restart=on-failure
+RestartSec=5s
+
+# Type of service (script runs in foreground)
+Type=simple
+
+[Install]
+# Start the service during multi-user boot
+WantedBy=multi-user.target
+
+
+
+
+
